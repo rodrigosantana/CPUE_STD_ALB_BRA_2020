@@ -1,0 +1,5 @@
+## Files that git must to ignore
+.Rhistory
+.RData
+data/
+
