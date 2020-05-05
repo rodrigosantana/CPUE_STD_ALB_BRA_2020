@@ -1,9 +1,9 @@
 ########################################################################
-## Description: Yellowfin tuna CPUE Standardization - Longline Brazil
+## Description: Albacore tuna CPUE Standardization - Longline Brazil
 ##
 ## Maintainer: ICCAT / Brazilian SCC for Tunas and Tunas like
 ## Author: Rodrigo Sant'Ana
-## Created: ter abr 16 12:44:43 2019 (+0200)
+## Created: seg mai 04 10:01:43 2020 (+0200)
 ##
 ## URL:
 ## Doc URL:
@@ -28,51 +28,45 @@
 
 ########################################################################
 ######@> Loading R packages for the exploratory analyses...
+
+######@> Packages list
+## library(plyr)
 library(dplyr)
+## library(dtplyr)
 library(ggplot2)
-library(lme4)
-library(doBy)
-library(gridExtra)
-library(MuMIn)
-library(lsmeans)
-library(sjstats)
-##library(lmerTest)
-##library(pbkrtest)
-library(corrplot)
+## library(lme4)
+## library(doBy)
+## library(gridExtra)
+## library(MuMIn)
+## library(lsmeans)
+## library(sjstats)
+## ##library(lmerTest)
+## ##library(pbkrtest)
+## library(corrplot)
 library(cluster)
 library(reshape2)
-library(grImport)
+## library(grImport)
 library(date)
 library(splines)
 library(maps)
 library(mapdata)
 library(maptools)
-library(data.table)
-library(lunar)
+## library(data.table)
+## library(lunar)
 library(lubridate)
 library(readr)
-library(plyr)
-library(dplyr)
-library(dtplyr)
-library(tm)
-library(readxl)
+## library(tm)
+## library(readxl)
 library(rpart)
 library(randomForest)
-library(mgcv)
+## library(mgcv)
 library(influ)
 library(nFactors)
-library(cluster)
-library(splines)
 library(boot)
 library(beanplot)
-library(lubridate)
 
 ########################################################################
 ######@> Installing cpue.rfmo package...
-
-######@> Install R package...
-## devtools::install_github("hoyles/cpue.rfmo", force = TRUE,
-##                          auth_token = "987db19f9b0901d0f44597935be7dc8f234f09cf")
 
 #####@> Installing package builded in my pc...
 ## install.packages("/home/rodrigo/Github/cpue.rfmo_0.1.0.tar.gz",
@@ -89,7 +83,7 @@ packageDescription("cpue.rfmo")
 
 ######@> Customization for ggplot2 theme...
 seta <- grid::arrow(length = grid::unit(0.2, "cm"), type = "open")
-my_theme <- function (base_size = 12, base_family = "Arial") {
+my_theme <- function(base_size = 12, base_family = "Arial") {
     theme_bw(base_size = base_size, base_family = base_family) %+replace%
         theme(axis.ticks = element_blank(),
               axis.line = element_line(arrow = seta),
@@ -103,163 +97,275 @@ my_theme <- function (base_size = 12, base_family = "Arial") {
               complete = TRUE)
 }
 
-######@> Windrose...
-norte <- pictureGrob(readPicture("../Padronizacao_CPUE_BET/NorthArrow_02.ps.xml"))
+
+########################################################################
+######@> Loading datasets...
+
+######@> Rawdata from Brazil...
+db <- read.table("data/BNDA_1978-2018_07-08-2019.csv", header = TRUE,
+                 sep = ";", dec = ",")
+
+######@> Base map...
+mm <- map_data("world")
 
 ########################################################################
 ######@> Adapting some cpue.rfmo functions...
 
-######@> Dataprep Brazil...
+######@> Dataprep Brazil - descriptive function - it was builded below...
 dataprep_BR <- function(dat, splist) {
-    dat <- mutate(dat, op_yr = year) %>%
-        mutate(dmy = parse_date(str_c(parse_character(year),"/",
-                                      parse_character(month),"/",
-                                      parse_character(day)),
-                                "%Y/%m/%d")) %>%
-        mutate(op_mon = dat$month) %>%
-        mutate(op_day = dat$day) %>%
-        mutate(hbf = parse_integer(hpb)) %>%
-        mutate(hooks = dat$effort) %>%
-        mutate(floats=hooks/hbf)
-    dat$moon <- dat$IL
-    dat$lon <- dat$lng
-    dat$lon5 <- dat$lng5
-    dat$qtr <- ceiling(as.numeric(dat$op_mon)/3)
+    dat <- dat %>%
+        mutate(dmy = ymd(paste(setyear, setmonth, set.day, sep = "/"))) %>%
+        mutate(op_yr = setyear) %>%
+        mutate(op_mon = setmonth) %>%
+        mutate(op_day = set.day) %>%
+        mutate(hbf = hpb) %>%
+        mutate(hooks = effort) %>%
+        mutate(floats = hooks/hbf)
+    dat$lon <- dat$set.lonb
+    dat$lat <- dat$set.latb
+    dat$qtr <- ceiling(as.numeric(dat$op_mon) / 3)
     dat$yrqtr <- dat$op_yr + floor((dat$op_mon - 1)/3)/4 + 0.125
     dat$latlong <- paste(dat$lat5, dat$lon5, sep = "_")
     dat$vessid <- as.factor(as.numeric(dat$boat))
     dat$tripidmon <- paste(dat$vessid, dat$op_yr, dat$op_mon)
-    dat$Total <- apply(dat[,splist], 1, sum, na.rm = TRUE)
-    dat$Total2 <- apply(dat[, c("bet.t", "yft.t", "alb.t")], 1, sum, na.rm = TRUE)
+    dat$Total <- apply(dat[, splist], 1, sum, na.rm = TRUE)
+    dat$Total2 <- apply(dat[, c("bet", "yft", "alb")], 1, sum,
+                        na.rm = TRUE)
+    dat <- dat %>%
+        select(vessid, flag, tripidmon, dmy, op_yr, op_mon, op_day,
+               qtr, yrqtr, hooks, hbf, floats, lat, lon, lat5, lon5,
+               latlong, Total, Total2, bft, yft, alb, bet, blf, skj,
+               oth, swo, sai, whm, bum, spf, spg, bsh, spx, bth, sma,
+               ocs, fal, ccs) %>%
+        as.data.frame()
     return(dat)
 }
 
-######@> Modifying dataclean function for Brazil...
-dataclean_BR <- function (dat, yearlim = 2018, splist) {
+######@> Modifying dataclean function for Brazil - same here...
+dataclean_BR <- function(dat, yearlim = 2019, splist) {
     for (sp in splist) {
         dat[, sp] <- as.numeric(dat[, sp])
         if (sum(is.na(dat[, sp])) > 0)
             dat[is.na(dat[, sp]), sp] <- 0
     }
-    data <- dat[dat$type == 1, ]
     dat <- dat[!is.na(dat$hooks), ]
     dat <- dat[dat$hooks < 5000, ]
     dat <- dat[dat$hooks >= 500, ]
     dat <- dat[is.na(dat$hbf) == FALSE, ]
     dat <- dat[dat$op_yr > 1976, ]
     dat <- dat[dat$yrqtr < yearlim, ]
-    dat <- dat[dat$hbf >= 5, ]
+    dat <- dat[dat$hbf >= 3, ]
     return(dat)
 }
 
 ########################################################################
-######@> Loading datasets...
-
-######@> Rawdata from Brazil...
-load("../BNDA/LL/Espelho_BNDA_LL_limpo.RData")
-rawdata <- dt10; rm(dt10)
-
-######@> Brazilian Longline logbook dataset...
-load("../BNDA/LL/Espelho_dataprep_BRA2.RData")
-prepdat <- dataprep_BRA2; rm(dataprep_BRA2)
-
-######@> Base map...
-mm <- map_data("world")
-
-########################################################################
 ######@> Preparing the structure of folders to receive the outputs...
 
-projdir <- "ICCAT/2019_Yellowfin/"
+######@> Directories...
+projdir <- "ICCAT/2020_Albacore/"
 brdir <- paste0(projdir, "BR/")
 datadir <- paste0(brdir, "data/")
 bralysis_dir <- paste0(brdir, "analyses/")
 brfigs <- paste0(brdir, "figures/")
 Rdir <- paste0(projdir, "Rfiles/")
-dir.create(bralysis_dir, recursive = TRUE)
-dir.create(brfigs)
+## dir.create(bralysis_dir, recursive = TRUE)
+## dir.create(brfigs)
 setwd(bralysis_dir)
 
 ########################################################################
 ######@> Cleaning dataset...
 
+######@> Selecting variables...
+prepdat <- db %>%
+    dplyr::select(boat, flag, hpb, effort, setyear, setmonth, set.day, Arte,
+                  set.latb, set.lonb,
+                  SBF.n, BFT.n, YFT.n, ALB.n, BET.n, BLF.n, SKJ.n,
+                  OTH.n, SWO.n, SAI.n, WHM.n, BUM.n, SPF.n, SPG.n,
+                  BSH.n, SPX.n, BTH.n, SMA.n, OCS.n, FAL.n, CCS.n) %>%
+    mutate(flag = as.character(flag)) %>%
+    as.data.frame()
+
+######@> Correcting flag...
+prepdat$flag <- ifelse(is.na(prepdat$flag), "BRA", prepdat$flag)
+
+######@> Correcting hpb data...
+
+#####@> Filtering 2018 boats...
+boats.2018 <- data.frame(
+    boat = sort(unique(prepdat$boat[prepdat$setyear == 2018])))
+
+####@> Estimating the hpb pattern for 2018 boats...
+hpb <- prepdat %>%
+    filter(boat %in% boats.2018$boat) %>%
+    group_by(boat) %>%
+    summarise(hpb.mea = round(mean(hpb, na.rm = TRUE))) %>%
+    mutate(hpb.mea = replace(hpb.mea, is.na(hpb.mea),
+                             round(mean(hpb.mea, na.rm = TRUE)))) %>%
+    as.data.frame()
+
+####@> Imputing the average for each boat in 2018...
+for(i in 1:nrow(prepdat)) {
+    if(is.na(prepdat$hpb[i])) {
+        prepdat$hpb[i] <- hpb$hpb.mea[which(hpb$boat == prepdat$boat[i])]
+    } else {
+        prepdat$hpb[i] <- prepdat$hpb[i]
+    }
+}
+
 ######@> Correcting the number of floats...
-prepdat$floats <- with(prepdat, hooks / hbf)
+prepdat$floats <- with(prepdat, effort / hpb)
 
 ######@> Correcting the lat5 and lon5...
-prepdat$lat5 <- 5 * floor(prepdat$lat/5) + 2.5
-prepdat$lon5 <- 5 * floor(prepdat$lon/5) + 2.5
+prepdat$lat5 <- 5 * floor(prepdat$set.latb / 5) + 2.5
+prepdat$lon5 <- 5 * floor(prepdat$set.lonb / 5) + 2.5
 prepdat$latlong <- paste(prepdat$lat5, prepdat$lon5, sep = "_")
+
+######@> Correcting species names...
+names(prepdat)[11:31] <- tolower(gsub(".n", "", names(prepdat)[11:31]))
 
 ######@> Species list...
 splist <- c("yft", "alb", "bet", "swo", "sai", "whm", "bum", "bsh",
             "spx", "bth", "sma", "ocs", "fal", "ccs")
 
+######@> Cleaning some data...
+
+#####@> Dataprep Brazil function...
+dataprep_BR <- function(dat, splist) {
+    dat <- dat %>%
+        mutate(dmy = ymd(paste(setyear, setmonth, set.day, sep = "/"))) %>%
+        mutate(op_yr = setyear) %>%
+        mutate(op_mon = setmonth) %>%
+        mutate(op_day = set.day) %>%
+        mutate(hbf = hpb) %>%
+        mutate(hooks = effort) %>%
+        mutate(floats = hooks/hbf)
+    dat$lon <- dat$set.lonb
+    dat$lat <- dat$set.latb
+    dat$qtr <- ceiling(as.numeric(dat$op_mon) / 3)
+    dat$yrqtr <- dat$op_yr + floor((dat$op_mon - 1)/3)/4 + 0.125
+    dat$latlong <- paste(dat$lat5, dat$lon5, sep = "_")
+    dat$vessid <- as.factor(as.numeric(dat$boat))
+    dat$tripidmon <- paste(dat$vessid, dat$op_yr, dat$op_mon)
+    dat$Total <- apply(dat[, splist], 1, sum, na.rm = TRUE)
+    dat$Total2 <- apply(dat[, c("bet", "yft", "alb")], 1, sum,
+                        na.rm = TRUE)
+    dat <- dat %>%
+        dplyr::select(vessid, flag, tripidmon, dmy, op_yr, op_mon,
+                      op_day, qtr, yrqtr, hooks, hbf, floats, lat, lon,
+                      lat5, lon5, latlong, Total, Total2, bft, yft, alb,
+                      bet, blf, skj, oth, swo, sai, whm, bum, spf, spg,
+                      bsh, spx, bth, sma, ocs, fal, ccs) %>%
+        as.data.frame()
+    return(dat)
+}
+
+#####@> Data preparation 2...
+prepdat2 <- dataprep_BR(prepdat, splist)
+
 ######@> Setup Regions...
-prepdat2 <- setup_AO_regions(dat = prepdat, regB = TRUE, regB1 = TRUE,
+prepdat3 <- setup_AO_regions(dat = prepdat2, regB = TRUE, regB1 = TRUE,
                              regY = TRUE, regY1 = TRUE, regY2 = TRUE)
 
+#####@> Calling regions 0 by 1...
+prepdat3$regB <- ifelse(prepdat3$regB == 0, 1, prepdat3$regB)
+prepdat3$regB1 <- ifelse(prepdat3$regB1 == 0, 1, prepdat3$regB1)
+prepdat3$regY <- ifelse(prepdat3$regY == 0, 1, prepdat3$regY)
+prepdat3$regY1 <- ifelse(prepdat3$regY1 == 0, 1, prepdat3$regY1)
+prepdat3$regY2 <- ifelse(prepdat3$regY2 == 0, 1, prepdat3$regY2)
+
+######@> Choosing default colors...
+gg_color_hue <- function(n) {
+    hues = seq(15, 375, length = n + 1)
+    hcl(h = hues, l = 65, c = 100)[1:n]
+}
+col <- gg_color_hue(5)
+
 #####@> Visualizing spatial distribution of sets...
-p00 <- ggplot(data = prepdat2, aes(x = lon5, y = lat5)) +
+p00 <- ggplot(data = prepdat3, aes(x = lon5, y = lat5)) +
     geom_tile(aes(fill = factor(regB)), colour = "black") +
     geom_polygon(data = mm, aes(x = long, y = lat, group = group)) +
     geom_hline(yintercept = 0, color = "black", linetype = "dashed") +
-    ## scale_fill_manual(name = "Areas",
-    ##                   values = c("red", "green", "blue")) +
+    scale_fill_manual(name = "Areas",
+                      values = col[1:3]) +
     coord_fixed(xlim = c(-55, 0), ylim = c(-50, 20)) +
     xlab(expression(paste("Longitude ", "(", degree, ")"))) +
     ylab(expression(paste("Latitude ", "(", degree, ")"))) +
     my_theme()
+p00
 
-p01 <- ggplot(data = prepdat2, aes(x = lon5, y = lat5)) +
+p01 <- ggplot(data = prepdat3, aes(x = lon5, y = lat5)) +
     geom_tile(aes(fill = factor(regB1)), colour = "black") +
     geom_polygon(data = mm, aes(x = long, y = lat, group = group)) +
     geom_hline(yintercept = 0, color = "black", linetype = "dashed") +
-    ## scale_fill_manual(name = "Areas",
-    ##                   values = c("red", "green", "blue")) +
+    scale_fill_manual(name = "Areas",
+                      values = col[1:3]) +
     coord_fixed(xlim = c(-55, 0), ylim = c(-50, 20)) +
     xlab(expression(paste("Longitude ", "(", degree, ")"))) +
     ylab(expression(paste("Latitude ", "(", degree, ")"))) +
     my_theme()
+p01
 
-p02 <- ggplot(data = prepdat2, aes(x = lon5, y = lat5)) +
+p02 <- ggplot(data = prepdat3, aes(x = lon5, y = lat5)) +
     geom_tile(aes(fill = factor(regY)), colour = "black") +
     geom_polygon(data = mm, aes(x = long, y = lat, group = group)) +
     geom_hline(yintercept = 0, color = "black", linetype = "dashed") +
-    ## scale_fill_manual(name = "Areas",
-    ##                   values = c("red", "green", "blue")) +
+    scale_fill_manual(name = "Areas",
+                      values = col[1:3]) +
     coord_fixed(xlim = c(-55, 0), ylim = c(-50, 20)) +
     xlab(expression(paste("Longitude ", "(", degree, ")"))) +
     ylab(expression(paste("Latitude ", "(", degree, ")"))) +
     my_theme()
+p02
 
-p03 <- ggplot(data = filter(prepdat2, lat5 <= 10),
+p03 <- ggplot(data = filter(prepdat3, lat5 <= 10),
               aes(x = lon5, y = lat5)) +
     geom_tile(aes(fill = factor(regY1)), colour = "black") +
     geom_polygon(data = mm, aes(x = long, y = lat, group = group)) +
     geom_hline(yintercept = 0, color = "black", linetype = "dashed") +
-    ## scale_fill_manual(name = "Areas",
-    ##                   values = c("red", "green", "blue")) +
+    scale_fill_manual(name = "Areas",
+                      values = col[1:3]) +
     coord_fixed(xlim = c(-55, 0), ylim = c(-50, 20)) +
     xlab(expression(paste("Longitude ", "(", degree, ")"))) +
     ylab(expression(paste("Latitude ", "(", degree, ")"))) +
     my_theme()
+p03
 
-p04 <- ggplot(data = prepdat2, aes(x = lon5, y = lat5)) +
+p04 <- ggplot(data = prepdat3, aes(x = lon5, y = lat5)) +
     geom_tile(aes(fill = factor(regY2)), colour = "black") +
     geom_polygon(data = mm, aes(x = long, y = lat, group = group)) +
     geom_hline(yintercept = 0, color = "black", linetype = "dashed") +
-    ## scale_fill_manual(name = "Areas",
-    ##                   values = c("red", "green", "blue")) +
+    scale_fill_manual(name = "Areas",
+                      values = col[1:5]) +
     coord_fixed(xlim = c(-55, 0), ylim = c(-50, 20)) +
     xlab(expression(paste("Longitude ", "(", degree, ")"))) +
     ylab(expression(paste("Latitude ", "(", degree, ")"))) +
     my_theme()
+p04
 
 ######@> Cleaning data set...
-dat <- dataclean_BR(dat = prepdat2, splist = splist)
+
+#####@> Function to do that
+dataclean_BR <- function(dat, yearlim = 2019, splist) {
+    for (sp in splist) {
+        dat[, sp] <- as.numeric(dat[, sp])
+        if (sum(is.na(dat[, sp])) > 0)
+            dat[is.na(dat[, sp]), sp] <- 0
+    }
+    dat <- dat[!is.na(dat$hooks), ]
+    dat <- dat[dat$hooks < 5000, ]
+    dat <- dat[dat$hooks >= 500, ]
+    dat <- dat[is.na(dat$hbf) == FALSE, ]
+    dat <- dat[dat$op_yr > 1976, ]
+    dat <- dat[dat$yrqtr < yearlim, ]
+    dat <- dat[dat$hbf >= 3, ]
+    return(dat)
+}
+
+#####@> Cleaning set...
+dat <- dataclean_BR(dat = prepdat3, splist = splist)
 
 ######@> Export final data set...
-save(prepdat, dat, file = "BRdat.RData")
+save(prepdat3, dat, file = "BRdat.RData")
 
 ########################################################################
 ######@> Exploring dataset...
@@ -292,9 +398,9 @@ dev.off()
 #####@> structure...
 a <- unique(paste(dat$lat, dat$lon))
 a0 <- dat[match(a, paste(dat$lat, dat$lon)),
-          c("lat","lon","regB", "regB1", "regY", "regY1")]
+          c("lat","lon","regB", "regB1", "regY", "regY1", "regY2")]
 
-for (fld in c("regB", "regB1", "regY", "regY1")) {
+for (fld in c("regB", "regB1", "regY", "regY1", "regY2")) {
     dev.new(widath = 10, height = 10)
     reg <- with(a0, get(fld))
     plot(a0$lon, a0$lat, type = "n", xlab = "Longitude",
@@ -387,7 +493,7 @@ dev.off()
 #####@> Plot hbf... Change spatial selection criteria for AO.
 dev.new(20, 14)
 par(mfrow = c(3, 3), mar = c(2, 2, 2, 2))
-for (y in seq(1980, 2015, 5)) {
+for (y in seq(1975, 2015, 5)) {
     a <- dat[dat$op_yr %in% y:(y+4),]
     ## max.hbf <- max(a$hbf, na.rm = TRUE)
     a <- tapply(a$hbf, list(a$lon5, a$lat5), mean, na.rm = T)
@@ -407,7 +513,7 @@ qqs <- c(0.125, 0.375, 0.625, 0.875)
 for (qq in 1:4) {
     dev.new(20, 14)
     par(mfrow = c(3, 3), mar = c(2, 2, 2, 2), oma = c(0, 0, 1, 0))
-    for (y in seq(1980, 2015,5)) {
+    for (y in seq(1975, 2015, 5)) {
         a <- dat[dat$yrqtr %in% (qqs[qq]+y:(y+4)), ]
         a <- tapply(a$hbf, list(a$lon5, a$lat5), mean, na.rm = T)
         image(as.numeric(dimnames(a)[[1]]),
@@ -453,7 +559,7 @@ a$falcpue <- a$fal/a$hooks
 a$ccscpue <- a$ccs/a$hooks
 
 ###@> simple model 01...
-simplemod01 <- rpart(a$yftcpue ~ a$lon + a$lat + a$yrqtr + a$albcpue +
+simplemod01 <- rpart(a$albcpue ~ a$lon + a$lat + a$yrqtr + a$yftcpue +
                          a$betcpue + a$swocpue + a$saicpue + a$whmcpue +
                          a$bumcpue + a$bshcpue + a$spxcpue + a$bthcpue +
                          a$smacpue + a$ocscpue + a$falcpue + a$ccscpue)
@@ -461,24 +567,24 @@ simplemod01 <- rpart(a$yftcpue ~ a$lon + a$lat + a$yrqtr + a$albcpue +
 dev.new(width = 11, height = 7)
 plot(simplemod01)
 text(simplemod01)
-savePlot("Rpart_yft_cpue_full", type = "png")
+savePlot("Rpart_alb_cpue_full", type = "png")
 dev.off()
 
-simplemod02 <- rpart(a$yftcpue ~ a$lon + a$lat + a$yrqtr + a$albcpue +
-                         a$betcpue + a$whmcpue)
+simplemod02 <- rpart(a$albcpue ~ a$lon + a$lat + a$yrqtr + a$bshcpue +
+                         a$yftcpue + a$swocpue + a$betcpue)
 
 dev.new(width = 11, height = 7)
 plot(simplemod02)
 text(simplemod02)
-savePlot("Rpart_yft_cpue_subset", type = "png")
+savePlot("Rpart_alb_cpue_subset", type = "png")
 dev.off()
 
 #####@> Exploration with Random Forest...
 
 ####@> These take a long time and use a lot of memory, but are useful...
 system.time(
-    simplefor <- randomForest(yftcpue ~ lon + lat + yrqtr + hbf + albcpue +
-                                  betcpue + bshcpue + whmcpue, data = a)
+    simplefor <- randomForest(albcpue ~ lon + lat + yrqtr + hbf + bshcpue +
+                                  yftcpue + swocpue + betcpue, data = a)
 )
 
 print(simplefor)
@@ -487,11 +593,11 @@ dev.new(width = 11, height = 7)
 plot(simplefor)
 
 varImpPlot(simplefor)
-savePlot("Rforest_yft_cpue", type = "png")
+savePlot("Rforest_alb_cpue", type = "png")
 dev.off()
 
 partialPlot(simplefor, pred.data = a, x.var = "hbf")
-savePlot("Rforest_yft_cpue_partial", type = "png")
+savePlot("Rforest_alb_cpue_partial", type = "png")
 dev.off()
 
 ########################################################################
@@ -510,19 +616,19 @@ use_splist <- c("yft", "alb", "bet", "swo", "sai", "bum", "bsh", "whm",
                 "sma")
 allabs <- c("vessid", "yrqtr", "latlong", "op_yr", "hbf", "hooks",
             "tripidmon", use_splist, "Total", "lat", "lon", "lat5",
-            "lon5", "regB", "regB1")
+            "lon5", "regB", "regB1", "regY", "regY1", "regY2")
 dat <- data.frame(dat)
 
-#####@> Number of yellowfin clusters. Will need to be adjusted for each
+#####@> Number of albacore clusters. Will need to be adjusted for each
 #####@> fleet...
-nclB <- c(0, 5, 4)
+nclB <- c(4, 4, 4)
 flag <- "BR"
 cvn <- c("yrqtr", "latlong", "hooks", "hbf", "vessid", "Total", "lat",
          "lon", "lat5", "lon5", "op_yr", "tripidmon", "regB", "regB1",
-         "regY", "regY1")
+         "regY", "regY1", "regY2")
 allabs <- c("vessid", "yrqtr", "latlong", "op_yr", "hbf", "hooks",
             "tripidmon", use_splist, "Total", "lat", "lon", "lat5",
-            "lon5", "regB", "regB1", "regY", "regY1")
+            "lon5", "regB", "regB1", "regY", "regY1", "regY2")
 
 #####@> Looping for the analysis of the species - regB region...
 for (r in unique(dat$regB)) {
@@ -552,10 +658,36 @@ for (r in unique(dat$regY1)) {
     dev.off()
 }
 
+#####@> Looping for the analysis of the species - regY2 region...
+for (r in unique(dat$regY2)) {
+    dev.new(15, 12)
+    par(mfrow = c(5, 3), mar = c(3, 2, 2, 1), oma = c(0, 0, 2, 0))
+    a <- dat[dat$regY2 == r, ]
+    for (sp in br_splist) {
+        plot(sort(unique(a$yrqtr)), tapply(a[, sp], a$yrqtr, mean), main = sp)
+        title(paste("Region", r ), outer = TRUE)
+        savePlot(filename = paste("freq", flag, "regY2_Region", r, sep = "_"),
+                 type = "png")
+    }
+    dev.off()
+}
 
 #####@> Cluster analyses for regB region...
 regtype <- "regB"
 for (r in unique(dat$regB)) {
+    fnh <- paste(flag, regtype, r, sep = "_")
+    dataset <- clust_PCA_run(r = r, ddd = dat, allsp = use_splist,
+                             allabs = allabs, regtype = regtype,
+                             ncl = nclB[r], plotPCA = FALSE,
+                             clustid = "tripidmon",
+                             allclust = FALSE, ll5 = TRUE, flag = flag,
+                             fnhead = fnh, covarnames = cvn)
+    save(dataset, file = paste0(fnh, ".RData"))
+}
+
+#####@> Cluster analyses for regB1 region...
+regtype <- "regB1"
+for (r in unique(dat$regB1)) {
     fnh <- paste(flag, regtype, r, sep = "_")
     dataset <- clust_PCA_run(r = r, ddd = dat, allsp = use_splist,
                              allabs = allabs, regtype = regtype,
@@ -579,7 +711,7 @@ for (r in unique(dat$regY1)) {
     save(dataset, file = paste0(fnh, ".RData"))
 }
 
-#####@> Cluster analyses for both regions integrated...
+#####@> Cluster analyses for all regions integrated...
 dat2 <- dat
 dat2$reg <- 1
 nclB <- 4
@@ -605,21 +737,13 @@ for (r in unique(dat2$reg)) {
 ########################################################################
 ######@> Standardization CPUE...
 
-######@> Perceptions about cluster analysis...
-## Brazil only, clusters, HBF
-## R2 - 5 clusters. G01 = yft (sai, whm, sma, bum), G02 = bet (yft, bum,
-## bsh, whm, sma), G03 = bsh (whm, sma), G04 = alb (bum, whm, sma, G05 =
-## swo (sai, bum, whm, sma)). Use 1, 2, 3, 4, 5
-## R3 - 3 clusters. G01 = bsh (sma, swo), G02 = swo (bsh, whm), G03 = yft
-## (alb, bet, swo, bum, sma). Use 1, 2, 3
-
 ######@> Defining the new folder for the next analyses...
 resdir <- "../analyses/std_cl_BRonly_hbf"
-## dir.create(resdir)
+dir.create(resdir)
 setwd(resdir)
 
 ####@> defining the projdir...
-projdir <- "/mnt/Dados/Dropbox/Works/CPGs/SCC-CPG_Atuns/R-Work/Padronizacao_CPUE_YFT/ICCAT/2019_Yellowfin/"
+projdir <- "~/Github/CPUE_STD_ALB_BRA_2020/ICCAT/2020_Albacore/"
 
 ######@> Defining the species list...
 splist <- c("alb", "bet", "yft", "swo", "bsh", "whm", "sai", "sma",
@@ -633,126 +757,24 @@ stdlabs <- c("vessid", "yrqtr", "latlong", "op_yr", "op_mon", "hbf",
 ######@> Defining the clusters for the standardization...
 
 #####@> Joint standardization...
-clkeepJP_Y <- list("yft" = list(c(1, 2, 4), c(1, 2, 3, 4), c(1, 2, 3)))
-clkeepKR_Y <- list("yft" = list(c(0), c(1, 2, 3, 4), c(1, 2, 3)))
-clkeepBR_Y <- list("yft" = list(c(1, 2, 3, 4), c(1, 2, 3, 4, 5), c(1, 2, 3, 4)))
-clkeepTW_Y <- list("yft" = list(c(4), c(2, 3), c(0)))
-clkeepUS_Y <- list("yft" = list(c(2, 3), c(1, 3), c(0)))
-clk_Y <- list(JP = clkeepJP_Y, KR = clkeepKR_Y, BR = clkeepBR_Y,
-              TW = clkeepTW_Y, US = clkeepUS_Y)
+## clkeepJP_Y <- list("alb" = list(c(1, 2, 4), c(1, 2, 3, 4), c(1, 2, 3)))
+## clkeepKR_Y <- list("alb" = list(c(0), c(1, 2, 3, 4), c(1, 2, 3)))
+clkeepBR_A <- list("alb" = list(c(1, 2, 3, 4), c(1, 2, 3, 4), c(1, 2, 3, 4)))
+## clkeepTW_Y <- list("alb" = list(c(4), c(2, 3), c(0)))
+## clkeepUS_Y <- list("alb" = list(c(2, 3), c(1, 3), c(0)))
+## clk_Y <- list(JP = clkeepJP_Y, KR = clkeepKR_Y, BR = clkeepBR_Y,
+##               TW = clkeepTW_Y, US = clkeepUS_Y)
 
 ######@> Brazil only...
-## clk_Y <- list(BR = clkeepBR_Y)
+clk_A <- list(BR = clkeepBR_A)
 
 ######@> Defining the parameters...
 runpars <- list()
-runpars[["yft"]] <- list(regtype = "regY1", regtype2 = "Y1", clk = clk_Y,
+runpars[["alb"]] <- list(regtype = "regY1", regtype2 = "Y1", clk = clk_A,
                          doregs = 2:3, addcl = TRUE, dohbf = TRUE,
                          cltype = "hcltrp")
-runreg = 1; runsp = "yft"
-keepd = TRUE; maxyr = 2017; maxqtrs = 200; minqtrs_byreg = c(5, 5, 5)
-
-#######@> Running the standardizations - NOTHING WORKS FROM HERE...
-## for (runsp in c("yft")) {
-##     regtype <- runpars[[runsp]]$regtype
-##     clk <- runpars[[runsp]]$clk
-##     addcl <- runpars[[runsp]]$addcl
-##     dohbf <- runpars[[runsp]]$dohbf
-##     cltype <- runpars[[runsp]]$cltype
-##     jdat <- data.frame()
-##     for (flag in c("BR")) {
-##         for (r in runpars[[runsp]]$doregs) {
-##             load(paste0(projdir, flag, "/clustering/",
-##                         paste(flag, regtype, r, sep = "_"), ".RData"))
-##             dataset$flag <- flag
-##             jdat <- rbind(jdat, dataset[, stdlabs])
-##             rm(dataset)
-##         }
-##     }
-##     jdat <- jdat[jdat$yrqtr < maxyr,]
-##     jdat$vessidx <- jdat$vessid
-##     jdat$vessid <- paste0(jdat$flag,jdat$vessid)
-##     jdat$vessid <- as.factor(jdat$vessid)
-##     jdat <- jdat[jdat$yrqtr > 2005 | jdat$flag != "TW",]
-##     vars <- c("vessid","hooks","yrqtr","latlong","hbf")
-##     for (runreg in runpars[[runsp]]$doregs) {
-##         minqtrs <- minqtrs_byreg[runreg]
-##         glmdat <- select_data_JointIO(jdat,
-##                                       runreg = runreg,
-##                                       clk = clk,
-##                                       minqtrs = minqtrs,
-##                                       runsp = runsp,
-##                                       mt = "deltabin",
-##                                       vars = vars,
-##                                       maxqtrs = maxqtrs,
-##                                       minvess = 50,
-##                                       minll = 50,
-##                                       minyrqtr = 50,
-##                                       addcl = addcl,
-##                                       cltype = cltype,
-##                                       addpca = NA,
-##                                       samp = NA,
-##                                       strsmp = NA,
-##                                       oneflag = TRUE)
-##         if (nrow(glmdat) > 60000) glmdat <- samp_strat_data(glmdat, 60)
-##         a <- jdat[jdat$vessid != "BR1",]
-##         wtt.all   <- mk_wts(glmdat, wttype = "area")
-##         fmla.oplogn <- make_formula_IO(runsp, modtype = "logn",
-##                                        dohbf = dohbf, addboat = F,
-##                                        addcl = T, nhbf = 3)
-##         fmla.oplogn_ncl <- make_formula_IO(runsp, modtype = "logn",
-##                                            dohbf = dohbf, addboat = F,
-##                                            addcl = F, nhbf = 3)
-##         fmla.boatlogn <- make_formula_IO(runsp, modtype = "logn",
-##                                          dohbf = dohbf, addboat = T,
-##                                          addcl = T,nhbf = 3)
-##         fmla.boatlogn_ncl <- make_formula_IO(runsp, modtype = "logn",
-##                                              dohbf = dohbf, addboat = T,
-##                                              addcl = F,nhbf = 3)
-##         mn <- with(glmdat, 0.1* mean(get(runsp)/hooks))
-##         modlab = "lognC_novess_allyrs"
-##         fname <- paste0("Joint_",regtype,"_R", runreg)
-##         if (lu(glmdat$clust) > 1) {
-##             model <- glm(fmla.oplogn, data = glmdat, weights = wtt.all,
-##                        family = "gaussian")
-##             gc()
-##         } else {
-##             model <- glm(fmla.oplogn_ncl, data = glmdat,
-##                          weights = wtt.all, family = "gaussian")
-##             gc()
-##         }
-##         summarize_and_store(mod = model, dat = glmdat, fname, modlab,
-##                             dohbf = dohbf, keepd = keepd)
-##         rm(model)
-##         ## lognC
-##         modlab = "lognC_boat_allyrs"
-##         fname <- paste0("Joint_",regtype,"_R",runreg)
-##         if (lu(glmdat$clust) > 1) {
-##             model <- glm(fmla.boatlogn, data = glmdat,
-##                          weights = wtt.all, family = "gaussian")
-##             gc()
-##         } else {
-##             model <- glm(fmla.boatlogn_ncl, data = glmdat,
-##                          weights = wtt.all, family = "gaussian")
-##             gc()
-##         }
-##         summarize_and_store(mod = model, dat = glmdat, fname, modlab,
-##                             dohbf = dohbf, keepd = keepd)
-##         rm(model)
-##         ## delta lognormal
-##         modlab = "dellog_novess_allyrs"
-##         fname <- paste0("Joint_",regtype,"_R",runreg)
-##         do_deltalog(dat = glmdat, dohbf = dohbf, addboat = F,
-##                     addcl = addcl, nhbf = 3, runsp = runsp,
-##                     fname = fname,modlab = modlab, keepd = keepd)
-##         modlab = "dellog_boat_allyrs"
-##         fname <- paste0("Joint_",regtype,"_R",runreg)
-##         do_deltalog(dat = glmdat, dohbf = dohbf, addboat = T,
-##                     addcl = addcl, nhbf = 3, runsp = runsp,
-##                     fname = fname, modlab = modlab, keepd = keepd)
-##         graphics.off()
-##     }
-## }
+runreg = 1; runsp = "alb"
+keepd = TRUE; maxyr = 2018; maxqtrs = 200; minqtrs_byreg = c(5, 5, 5)
 
 ######@> Running standardization by hand...
 
@@ -762,29 +784,29 @@ keepd = TRUE; maxyr = 2017; maxqtrs = 200; minqtrs_byreg = c(5, 5, 5)
 load("../../clustering/BR_regY1_2.RData")
 jdat02 <- dataset; rm(dataset)
 
-####@> watching the dataset for the proportions of catches of yft per
+####@> watching the dataset for the proportions of catches of alb per
 ####@> vessel...
 tab <- jdat02 %>%
     group_by(vessid) %>%
-    summarise(yft = sum(yft, na.rm = TRUE),
+    summarise(alb = sum(alb, na.rm = TRUE),
               total = sum(Total, na.rm = TRUE)) %>%
-    mutate(prop = yft/total) %>%
+    mutate(prop = alb/total) %>%
     arrange(-prop) %>%
     as.data.frame()
 table(tab$prop == 0)
 
-####@> id for boats that never caught a yft in life...
+####@> id for boats that never caught a alb in life...
 id <- tab$vessid[tab$prop == 0]
 
-####@> removing the boats that never catched a yft in life...
+####@> removing the boats that never catched a alb in life...
 jdat02.cut <- filter(jdat02, !vessid %in% id)
 
 ####@> Defining data for glm...
 glmdat <- select_data_JointIO(jdat02.cut,
                               runreg = 2,
-                              clk = clk_Y,
+                              clk = clk_A,
                               minqtrs = 2,
-                              runsp = "yft",
+                              runsp = "alb",
                               mt = "deltabin",
                               vars = c("vessid", "hooks", "yrqtr",
                                        "latlong", "hbf"),
@@ -793,7 +815,7 @@ glmdat <- select_data_JointIO(jdat02.cut,
                               minvess = 5,
                               minll = 5,
                               minyrqtr = 50,
-                              yrlims = c(1999, 2018),
+                              yrlims = c(1998, 2019),
                               addcl = TRUE,
                               cltype = "hcltrp",
                               addpca = NA,
@@ -854,7 +876,7 @@ fname <- "BR_regY1_R02"
 
 ###@> Running the model...
 do_deltalog(dat = glmdat, dohbf = TRUE, addboat = FALSE, addcl = TRUE,
-            nhbf = 1, runsp = "yft", fname = fname, modlab = modlab,
+            nhbf = 1, runsp = "alb", fname = fname, modlab = modlab,
             keepd = TRUE)
 
 ####@> Running the model for vessels included...
@@ -865,7 +887,7 @@ fname <- "BR_regY1_R02"
 
 ###@> Running the model...
 do_deltalog(dat = glmdat, dohbf = TRUE, addboat = TRUE, addcl = TRUE,
-            nhbf = 1, runsp = "yft", fname = fname, modlab = modlab,
+            nhbf = 1, runsp = "alb", fname = fname, modlab = modlab,
             keepd = TRUE)
 
 #####@> Region Y1 03...
@@ -874,29 +896,29 @@ do_deltalog(dat = glmdat, dohbf = TRUE, addboat = TRUE, addcl = TRUE,
 load("../../clustering/BR_regY1_3.RData")
 jdat03 <- dataset; rm(dataset)
 
-####@> watching the dataset for the proportions of catches of yft per
+####@> watching the dataset for the proportions of catches of alb per
 ####@> vessel...
 tab <- jdat03 %>%
     group_by(vessid) %>%
-    summarise(yft = sum(yft, na.rm = TRUE),
+    summarise(alb = sum(alb, na.rm = TRUE),
               total = sum(Total, na.rm = TRUE)) %>%
-    mutate(prop = yft/total) %>%
+    mutate(prop = alb/total) %>%
     arrange(-prop) %>%
     as.data.frame()
 table(tab$prop == 0)
 
-####@> id for boats that never caught a yft in life...
+####@> id for boats that never caught a alb in life...
 id <- tab$vessid[tab$prop == 0]
 
-####@> removing the boats that never catched a yft in life...
+####@> removing the boats that never catched a alb in life...
 jdat03.cut <- filter(jdat03, !vessid %in% id)
 
 ####@> Defining data for glm...
 glmdat <- select_data_JointIO(jdat03.cut,
                               runreg = 3,
-                              clk = clk_Y,
+                              clk = clk_A,
                               minqtrs = 2,
-                              runsp = "yft",
+                              runsp = "alb",
                               mt = "deltabin",
                               vars = c("vessid", "hooks", "yrqtr",
                                        "latlong", "hbf"),
@@ -906,7 +928,7 @@ glmdat <- select_data_JointIO(jdat03.cut,
                               minll = 5,
                               minyrqtr = 50,
                               addcl = TRUE,
-                              yrlims = c(1999, 2018),
+                              yrlims = c(1998, 2019),
                               cltype = "hcltrp",
                               addpca = NA,
                               samp = NA,
@@ -966,7 +988,7 @@ fname <- "BR_regY1_R03"
 
 ###@> Running the model...
 do_deltalog(dat = glmdat, dohbf = TRUE, addboat = FALSE, addcl = TRUE,
-            nhbf = 1, runsp = "yft", fname = fname, modlab = modlab,
+            nhbf = 1, runsp = "alb", fname = fname, modlab = modlab,
             keepd = TRUE)
 
 ####@> Running the model for vessels included...
@@ -977,7 +999,7 @@ fname <- "BR_regY1_R03"
 
 ###@> Running the model...
 do_deltalog(dat = glmdat, dohbf = TRUE, addboat = TRUE, addcl = TRUE,
-            nhbf = 1, runsp = "yft", fname = fname, modlab = modlab,
+            nhbf = 1, runsp = "alb", fname = fname, modlab = modlab,
             keepd = TRUE)
 
 #####@> Regions Integrated in One...
@@ -986,29 +1008,29 @@ do_deltalog(dat = glmdat, dohbf = TRUE, addboat = TRUE, addcl = TRUE,
 load("../../clustering/BR_reg_All_Regions_Integrated_1All_Regions_Integrated.RData")
 jdatAll <- dataset; rm(dataset)
 
-####@> watching the dataset for the proportions of catches of yft per
+####@> watching the dataset for the proportions of catches of alb per
 ####@> vessel...
 tab <- jdatAll %>%
     group_by(vessid) %>%
-    summarise(yft = sum(yft, na.rm = TRUE),
+    summarise(alb = sum(alb, na.rm = TRUE),
               total = sum(Total, na.rm = TRUE)) %>%
-    mutate(prop = yft/total) %>%
+    mutate(prop = alb/total) %>%
     arrange(-prop) %>%
     as.data.frame()
 table(tab$prop == 0)
 
-####@> id for boats that never caught a yft in life...
+####@> id for boats that never caught a alb in life...
 id <- tab$vessid[tab$prop == 0]
 
-####@> removing the boats that never catched a yft in life...
+####@> removing the boats that never catched a alb in life...
 jdatAll.cut <- filter(jdatAll, !vessid %in% id)
 
 ####@> Defining data for glm...
 glmdat <- select_data_JointIO(jdatAll.cut,
                               runreg = 1,
-                              clk = clk_Y,
+                              clk = clk_A,
                               minqtrs = 2,
-                              runsp = "yft",
+                              runsp = "alb",
                               mt = "deltabin",
                               vars = c("vessid", "hooks", "yrqtr",
                                        "latlong", "hbf"),
@@ -1018,27 +1040,27 @@ glmdat <- select_data_JointIO(jdatAll.cut,
                               minll = 5,
                               minyrqtr = 50,
                               addcl = TRUE,
-                              yrlims = c(1999, 2018),
+                              yrlims = c(1998, 2019),
                               cltype = "hcltrp",
                               addpca = NA,
                               samp = NA,
                               strsmp = NA)
 
 #####@> Table for comparison of the coverage...
-tab01 <- prepdat %>%
+tab01 <- dat %>%
     group_by(op_yr) %>%
-    summarise(yft = sum(yft, na.rm = TRUE)) %>%
-    filter(op_yr %in% 1999:2017)
+    summarise(alb = sum(alb, na.rm = TRUE)) %>%
+    filter(op_yr %in% 1998:2018)
 
 tab02 <- glmdat %>%
     mutate(op_yr = floor(as.numeric(as.character(yrqtr)))) %>%
     group_by(op_yr) %>%
-    summarise(yft = sum(yft, na.rm = TRUE)) %>%
-    filter(op_yr %in% 1999:2017)
+    summarise(alb = sum(alb, na.rm = TRUE)) %>%
+    filter(op_yr %in% 1998:2018)
 
 tab03 <- merge(tab01, tab02, by = "op_yr")
 
-tab03$prop <- with(tab03, yft.y / yft.x)
+tab03$prop <- with(tab03, alb.y / alb.x)
 
 write.table(tab03, file = "BR_Coverage.csv", sep = ",", dec = ".",
             row.names = FALSE)
@@ -1097,7 +1119,7 @@ fname <- "BR_Reg_All_Integrated"
 
 ###@> Running the model...
 do_deltalog(dat = glmdat, dohbf = TRUE, addboat = FALSE, addcl = TRUE,
-            nhbf = 1, runsp = "yft", fname = fname, modlab = modlab,
+            nhbf = 1, runsp = "alb", fname = fname, modlab = modlab,
             keepd = TRUE)
 
 ####@> Running the model for vessels included...
@@ -1108,7 +1130,7 @@ fname <- "BR_Reg_All_Integrated"
 
 ###@> Running the model...
 do_deltalog(dat = glmdat, dohbf = TRUE, addboat = TRUE, addcl = TRUE,
-            nhbf = 1, runsp = "yft", fname = fname, modlab = modlab,
+            nhbf = 1, runsp = "alb", fname = fname, modlab = modlab,
             keepd = TRUE)
 
 ########################################################################
@@ -1128,14 +1150,14 @@ doplot_cpue <- function(a, vartype, mdti, regstr, runreg) {
 
 ######@> Creating a new directory to receive the outputs...
 outdir <- "outputs"
-## dir.create(outdir)
+dir.create(outdir)
 setwd(outdir)
 
 ######@> Configurations to load and run diagnostics...
 
 #####@> Model lognC - Region Y1 02 - No Vessels ID...
 mdt <- "novess_allyrs"
-mdti <- "1999 - present no vessid"
+mdti <- "1998 - present no vessid"
 vartype <- "lognC"
 regstr <- "regY1"
 runreg <- "02"
@@ -1204,7 +1226,7 @@ write.csv(nd, file = paste(fname, modtype, "yr.csv", sep = "_"))
 
 #####@> Model lognC - Region Y1 03 - No Vessels ID...
 mdt <- "novess_allyrs"
-mdti <- "1999 - present no vessid"
+mdti <- "1998 - present no vessid"
 vartype <- "lognC"
 regstr <- "regY1"
 runreg <- "03"
@@ -1273,7 +1295,7 @@ write.csv(nd, file = paste(fname, modtype, "yr.csv", sep = "_"))
 
 #####@> Model lognC - Region Y1 02 - Vessels ID...
 mdt <- "boat_allyrs"
-mdti <- "1999 - present with vessid"
+mdti <- "1998 - present with vessid"
 vartype <- "lognC"
 regstr <- "regY1"
 runreg <- "02"
@@ -1342,7 +1364,7 @@ write.csv(nd, file = paste(fname, modtype, "yr.csv", sep = "_"))
 
 #####@> Model lognC - Region Y1 03 - No Vessels ID...
 mdt <- "boat_allyrs"
-mdti <- "1999 - present with vessid"
+mdti <- "1998 - present with vessid"
 vartype <- "lognC"
 regstr <- "regY1"
 runreg <- "03"
@@ -1411,7 +1433,7 @@ write.csv(nd, file = paste(fname, modtype, "yr.csv", sep = "_"))
 
 #####@> Model Delta LogNormal - Region Y1 02 - No Vessels ID...
 mdt <- "novess_allyrs"
-mdti <- "1999 - present no vessid"
+mdti <- "1998 - present no vessid"
 vartype <- "dellog"
 regstr <- "regY1"
 runreg <- "02"
@@ -1463,7 +1485,7 @@ write.csv(nd, file = paste(fname, modtype, "yr.csv", sep = "_"))
 
 #####@> Model Delta LogNormal - Region Y1 03 - No Vessels ID...
 mdt <- "novess_allyrs"
-mdti <- "1999 - present no vessid"
+mdti <- "1998 - present no vessid"
 vartype <- "dellog"
 regstr <- "regY1"
 runreg <- "03"
@@ -1515,7 +1537,7 @@ write.csv(nd, file = paste(fname, modtype, "yr.csv", sep = "_"))
 
 #####@> Model Delta LogNormal - Region Y1 02 - Vessels ID...
 mdt <- "boat_allyrs"
-mdti <- "1999 - present with vessid"
+mdti <- "1998 - present with vessid"
 vartype <- "dellog"
 regstr <- "regY1"
 runreg <- "02"
@@ -1567,7 +1589,7 @@ write.csv(nd, file = paste(fname, modtype, "yr.csv", sep = "_"))
 
 #####@> Model Delta LogNormal - Region Y1 03 - Vessels ID...
 mdt <- "boat_allyrs"
-mdti <- "1999 - present with vessid"
+mdti <- "1998 - present with vessid"
 vartype <- "dellog"
 regstr <- "regY1"
 runreg <- "03"
@@ -1619,7 +1641,7 @@ write.csv(nd, file = paste(fname, modtype, "yr.csv", sep = "_"))
 
 #####@> Model lognC - Integrated Regions - No Vessels ID...
 mdt <- "novess_allyrs"
-mdti <- "1999 - present no vessid"
+mdti <- "1998 - present no vessid"
 vartype <- "lognC"
 regstr <- "Reg_All_Integrated"
 runreg <- ""
@@ -1688,7 +1710,7 @@ write.csv(nd, file = paste(fname, modtype, "yr.csv", sep = "_"))
 
 #####@> Model lognC - All Integreted Regions - Vessels ID...
 mdt <- "boat_allyrs"
-mdti <- "1999 - present with vessid"
+mdti <- "1998 - present with vessid"
 vartype <- "lognC"
 regstr <- "Reg_All_Integrated"
 runreg <- ""
@@ -1757,7 +1779,7 @@ write.csv(nd, file = paste(fname, modtype, "yr.csv", sep = "_"))
 
 #####@> Model Delta LogNormal - Integrated Regions - No Vessels ID...
 mdt <- "novess_allyrs"
-mdti <- "1999 - present no vessid"
+mdti <- "1998 - present no vessid"
 vartype <- "dellog"
 regstr <- "Reg_All_Integrated"
 runreg <- ""
@@ -1809,7 +1831,7 @@ write.csv(nd, file = paste(fname, modtype, "yr.csv", sep = "_"))
 
 #####@> Model Delta LogNormal - All Integrated Regions - Vessels ID...
 mdt <- "boat_allyrs"
-mdti <- "1999 - present with vessid"
+mdti <- "1998 - present with vessid"
 vartype <- "dellog"
 regstr <- "Reg_All_Integrated"
 runreg <- ""
@@ -1868,18 +1890,18 @@ tag <- c("BR_regY1_R02_dellog_boat_allyrs_yr.csv",
          "BR_Reg_All_Integrated_dellog_boat_allyrs_yr.csv")
 
 ######@> Plot lines to compare...
-plot(1999:2017, 1999:2017, type = "n", ylim = c(0, 3),
-     xlim = c(1999, 2017), xlab = "Years", ylab = "Scaled index",
+plot(1998:2018, 1998:2018, type = "n", ylim = c(0, 3),
+     xlim = c(1998, 2018), xlab = "Years", ylab = "Scaled index",
      axes = FALSE)
-axis(1, at = 1999:2017, labels = 1999:2017)
+axis(1, at = 1998:2018, labels = 1998:2018)
 axis(2, at = 0:3, labels = 0:3)
-for(i in 1:2) {
+for(i in 1:3) {
     a <- read.csv(paste(tag[i]))
     lines(a$yr, a$pr, col = i, lwd = 2)
 }
-legend("topright", legend = c("Y1 - R02", "Y1 - R03"),
-       col = 1:2, lwd = 2)
-savePlot("YFT_DeltaLogN_Boat_Comparison_by_Regions_ver02.png", type = "png")
+legend("topright", legend = c("Y1 - R02", "Y1 - R03", "All Regions"),
+       col = 1:3, lwd = 2)
+savePlot("ALB_DeltaLogN_Boat_Comparison_by_Regions_ver02.png", type = "png")
 
 ######@> Comparisons between indexes by regions and integration with
 ######@> no boats - Delta LogNormal...
@@ -1890,10 +1912,10 @@ tag <- c("BR_regY1_R02_dellog_novess_allyrs_yr.csv",
          "BR_Reg_All_Integrated_dellog_novess_allyrs_yr.csv")
 
 ######@> Plot lines to compare...
-plot(1999:2017, 1999:2017, type = "n", ylim = c(0, 3),
-     xlim = c(1999, 2017), xlab = "Years", ylab = "Scaled index",
+plot(1998:2018, 1998:2018, type = "n", ylim = c(0, 3),
+     xlim = c(1998, 2018), xlab = "Years", ylab = "Scaled index",
      axes = FALSE)
-axis(1, at = 1999:2017, labels = 1999:2017)
+axis(1, at = 1998:2018, labels = 1998:2018)
 axis(2, at = 0:3, labels = 0:3)
 for(i in 1:3) {
     a <- read.csv(paste(tag[i]))
@@ -1901,7 +1923,7 @@ for(i in 1:3) {
 }
 legend("topright", legend = c("Y1 - R02", "Y1 - R03", "All Regions"),
        col = 1:3, lwd = 2)
-savePlot("YFT_DeltaLogN_novess_Comparison_by_Regions.png", type = "png")
+savePlot("ALB_DeltaLogN_novess_Comparison_by_Regions.png", type = "png")
 
 ######@> Comparisons between indexes by regions and integration with
 ######@> boats - LognC...
@@ -1912,10 +1934,10 @@ tag <- c("BR_regY1_R02_lognC_boat_allyrs_yr.csv",
          "BR_Reg_All_Integrated_lognC_boat_allyrs_yr.csv")
 
 ######@> Plot lines to compare...
-plot(1999:2017, 1999:2017, type = "n", ylim = c(0, 3),
-     xlim = c(1999, 2017), xlab = "Years", ylab = "Scaled index",
+plot(1998:2018, 1998:2018, type = "n", ylim = c(0, 3),
+     xlim = c(1998, 2018), xlab = "Years", ylab = "Scaled index",
      axes = FALSE)
-axis(1, at = 1999:2017, labels = 1999:2017)
+axis(1, at = 1998:2018, labels = 1998:2018)
 axis(2, at = 0:3, labels = 0:3)
 for(i in 1:3) {
     a <- read.csv(paste(tag[i]))
@@ -1923,7 +1945,7 @@ for(i in 1:3) {
 }
 legend("topright", legend = c("Y1 - R02", "Y1 - R03", "All Regions"),
        col = 1:3, lwd = 2)
-savePlot("YFT_LognC_Boat_Comparison_by_Regions.png", type = "png")
+savePlot("ALB_LognC_Boat_Comparison_by_Regions.png", type = "png")
 
 ######@> Comparisons between indexes by regions and integration with
 ######@> no boats - Delta LogNormal...
@@ -1934,10 +1956,10 @@ tag <- c("BR_regY1_R02_lognC_novess_allyrs_yr.csv",
          "BR_Reg_All_Integrated_lognC_novess_allyrs_yr.csv")
 
 ######@> Plot lines to compare...
-plot(1999:2017, 1999:2017, type = "n", ylim = c(0, 3),
-     xlim = c(1999, 2017), xlab = "Years", ylab = "Scaled index",
+plot(1998:2018, 1998:2018, type = "n", ylim = c(0, 3),
+     xlim = c(1998, 2018), xlab = "Years", ylab = "Scaled index",
      axes = FALSE)
-axis(1, at = 1999:2017, labels = 1999:2017)
+axis(1, at = 1998:2018, labels = 1998:2018)
 axis(2, at = 0:3, labels = 0:3)
 for(i in 1:3) {
     a <- read.csv(paste(tag[i]))
@@ -1945,7 +1967,7 @@ for(i in 1:3) {
 }
 legend("topright", legend = c("Y1 - R02", "Y1 - R03", "All Regions"),
        col = 1:3, lwd = 2)
-savePlot("YFT_LognC_novess_Comparison_by_Regions.png", type = "png")
+savePlot("ALB_LognC_novess_Comparison_by_Regions.png", type = "png")
 
 ######@> Influence analyses - LognC - Reg Y1 02 - No vessel id...
 
@@ -1953,14 +1975,14 @@ savePlot("YFT_LognC_novess_Comparison_by_Regions.png", type = "png")
 load("../BR_regY1_R02_lognC_novess_allyrs_model.RData")
 
 #####@> Setup for the analyses...
-runsp <- "yft"
+runsp <- "alb"
 mn <- with(mod$data, 0.1 * mean(get(runsp)/hooks))
 assign("wtt.all", mk_wts(mod$data, wttype = "area"))
 glmdat <- select_data_JointIO(jdat02.cut,
                               runreg = 2,
-                              clk = clk_Y,
+                              clk = clk_A,
                               minqtrs = 2,
-                              runsp = "yft",
+                              runsp = "alb",
                               mt = "deltabin",
                               vars = c("vessid", "hooks", "yrqtr",
                                        "latlong", "hbf"),
@@ -1969,7 +1991,7 @@ glmdat <- select_data_JointIO(jdat02.cut,
                               minvess = 5,
                               minll = 5,
                               minyrqtr = 50,
-                              yrlims = c(1999, 2018),
+                              yrlims = c(1998, 2019),
                               addcl = TRUE,
                               cltype = "hcltrp",
                               addpca = NA,
@@ -2031,14 +2053,14 @@ rm(mod)
 load("../BR_regY1_R02_lognC_boat_allyrs_model.RData")
 
 #####@> Setup for the analyses...
-runsp <- "yft"
+runsp <- "alb"
 mn <- with(mod$data, 0.1 * mean(get(runsp)/hooks))
 assign("wtt.all", mk_wts(mod$data, wttype = "area"))
 glmdat <- select_data_JointIO(jdat02.cut,
                               runreg = 2,
-                              clk = clk_Y,
+                              clk = clk_A,
                               minqtrs = 2,
-                              runsp = "yft",
+                              runsp = "alb",
                               mt = "deltabin",
                               vars = c("vessid", "hooks", "yrqtr",
                                        "latlong", "hbf"),
@@ -2047,7 +2069,7 @@ glmdat <- select_data_JointIO(jdat02.cut,
                               minvess = 5,
                               minll = 5,
                               minyrqtr = 50,
-                              yrlims = c(1999, 2018),
+                              yrlims = c(1998, 2019),
                               addcl = TRUE,
                               cltype = "hcltrp",
                               addpca = NA,
@@ -2109,14 +2131,14 @@ rm(mod)
 load("../BR_regY1_R03_lognC_novess_allyrs_model.RData", verbose = TRUE)
 
 #####@> Setup for the analyses...
-runsp <- "yft"
+runsp <- "alb"
 mn <- with(mod$data, 0.1 * mean(get(runsp)/hooks))
 assign("wtt.all", mk_wts(mod$data, wttype = "area"))
 glmdat <- select_data_JointIO(jdat03.cut,
                               runreg = 3,
-                              clk = clk_Y,
+                              clk = clk_A,
                               minqtrs = 2,
-                              runsp = "yft",
+                              runsp = "alb",
                               mt = "deltabin",
                               vars = c("vessid", "hooks", "yrqtr",
                                        "latlong", "hbf"),
@@ -2125,7 +2147,7 @@ glmdat <- select_data_JointIO(jdat03.cut,
                               minvess = 5,
                               minll = 5,
                               minyrqtr = 50,
-                              yrlims = c(1999, 2018),
+                              yrlims = c(1998, 2019),
                               addcl = TRUE,
                               cltype = "hcltrp",
                               addpca = NA,
@@ -2187,14 +2209,14 @@ rm(mod)
 load("../BR_regY1_R03_lognC_boat_allyrs_model.RData")
 
 #####@> Setup for the analyses...
-runsp <- "yft"
+runsp <- "alb"
 mn <- with(mod$data, 0.1 * mean(get(runsp)/hooks))
 assign("wtt.all", mk_wts(mod$data, wttype = "area"))
 glmdat <- select_data_JointIO(jdat03.cut,
                               runreg = 3,
-                              clk = clk_Y,
+                              clk = clk_A,
                               minqtrs = 2,
-                              runsp = "yft",
+                              runsp = "alb",
                               mt = "deltabin",
                               vars = c("vessid", "hooks", "yrqtr",
                                        "latlong", "hbf"),
@@ -2203,7 +2225,7 @@ glmdat <- select_data_JointIO(jdat03.cut,
                               minvess = 5,
                               minll = 5,
                               minyrqtr = 50,
-                              yrlims = c(1999, 2018),
+                              yrlims = c(1998, 2019),
                               addcl = TRUE,
                               cltype = "hcltrp",
                               addpca = NA,
@@ -2266,14 +2288,14 @@ load("../BR_Reg_All_Integrated_lognC_boat_allyrs_model.RData",
      verbose = TRUE)
 
 #####@> Setup for the analyses...
-runsp <- "yft"
+runsp <- "alb"
 mn <- with(mod$data, 0.1 * mean(get(runsp)/hooks))
 assign("wtt.all", mk_wts(mod$data, wttype = "area"))
 glmdat <- select_data_JointIO(jdatAll.cut,
                               runreg = 1,
-                              clk = clk_Y,
+                              clk = clk_A,
                               minqtrs = 2,
-                              runsp = "yft",
+                              runsp = "alb",
                               mt = "deltabin",
                               vars = c("vessid", "hooks", "yrqtr",
                                        "latlong", "hbf"),
@@ -2283,7 +2305,7 @@ glmdat <- select_data_JointIO(jdatAll.cut,
                               minll = 5,
                               minyrqtr = 50,
                               addcl = TRUE,
-                              yrlims = c(1999, 2018),
+                              yrlims = c(1998, 2019),
                               cltype = "hcltrp",
                               addpca = NA,
                               samp = NA,
@@ -2344,14 +2366,14 @@ rm(mod)
 load("../BR_Reg_All_Integrated_lognC_boat_allyrs_model.RData")
 
 #####@> Setup for the analyses...
-runsp <- "yft"
+runsp <- "alb"
 mn <- with(mod$data, 0.1 * mean(get(runsp)/hooks))
 assign("wtt.all", mk_wts(mod$data, wttype = "area"))
 glmdat <- select_data_JointIO(jdatAll.cut,
                               runreg = 1,
-                              clk = clk_Y,
+                              clk = clk_A,
                               minqtrs = 2,
-                              runsp = "yft",
+                              runsp = "alb",
                               mt = "deltabin",
                               vars = c("vessid", "hooks", "yrqtr",
                                        "latlong", "hbf"),
@@ -2360,7 +2382,7 @@ glmdat <- select_data_JointIO(jdatAll.cut,
                               minvess = 5,
                               minll = 5,
                               minyrqtr = 50,
-                              yrlims = c(1999, 2018),
+                              yrlims = c(1998, 2019),
                               addcl = TRUE,
                               cltype = "hcltrp",
                               addpca = NA,
@@ -2424,17 +2446,18 @@ a$decade <- with(a, op_yr - op_yr %% 10)
 
 ######@> Aggregating data per decade...
 tmp <- a %>%
-    group_by(lon, lat, decade, hcltrp) %>%
-    summarise(yft = sum(yft, na.rm = TRUE)) %>%
+    group_by(lon5, lat5, decade, hcltrp) %>%
+    summarise(alb = sum(alb, na.rm = TRUE)) %>%
     as.data.frame()
 
 #####@> Standardizing scale...
-quantile(tmp$yft, probs = seq(0, 1, 0.05))
+quantile(tmp$alb, probs = seq(0, 1, 0.01))
 
-int.v <- c(0, 2, 5, 7, 15, 30, 50, 83, 130, 245, 4642)
+int.v <- round(quantile(tmp$alb, probs = seq(0, 1, l = 11)))
+int.v[2] <- 1
 int.c <- int.v[1:(length(int.v)-1)]
 int.c2 <- int.v[2:length(int.v)]
-tmp$disc <- cut(tmp$yft, breaks = int.v,
+tmp$disc <- cut(tmp$alb, breaks = int.v,
                 include.lowest = TRUE, right = FALSE,
                 labels = int.c, dig.lab = 0)
 
@@ -2444,7 +2467,7 @@ gPal <- colorRampPalette(rev(brewer.pal(10, "RdYlGn")))
 cor <- gPal(length(int.c))
 
 #####@> mapping...
-p00 <- ggplot(data = tmp, aes(x = lon, y = lat)) +
+p00 <- ggplot(data = tmp, aes(x = lon5, y = lat5)) +
     geom_tile(aes(fill = disc), colour = "black") +
     geom_polygon(data = mm, aes(x = long, y = lat, group = group)) +
     geom_hline(yintercept = 0, color = "black", linetype = "dashed") +
@@ -2456,11 +2479,12 @@ p00 <- ggplot(data = tmp, aes(x = lon, y = lat)) +
                       labels = rev(paste("[", int.c, ", ",
                                          int.c2, ")", sep = "")),
                       limits = int.c, breaks = rev(int.c)) +
-    coord_fixed(xlim = c(-55, -15), ylim = c(5, -15)) +
+    coord_fixed(xlim = c(-55, -15), ylim = c(-15, 10)) +
     xlab(expression(paste("Longitude ", "(", degree, ")"))) +
     ylab(expression(paste("Latitude ", "(", degree, ")"))) +
     my_theme()
 p00
+
 savePlot("Map_Clusters_Decade_Y1_R02.png", type = "png")
 
 #######@> Mapping clusters per decade - Region 02...
@@ -2471,17 +2495,18 @@ a$decade <- with(a, op_yr - op_yr %% 10)
 
 ######@> Aggregating data per decade...
 tmp <- a %>%
-    group_by(lon, lat, decade, hcltrp) %>%
-    summarise(yft = sum(yft, na.rm = TRUE)) %>%
+    group_by(lon5, lat5, decade, hcltrp) %>%
+    summarise(alb = sum(alb, na.rm = TRUE)) %>%
     as.data.frame()
 
 #####@> padronizando a escala...
-quantile(tmp$yft, probs = seq(0, 1, 0.05))
+quantile(tmp$alb, probs = seq(0, 1, l = 11))
 
-int.v <- c(0, 1, 2, 4, 8, 12, 16, 23, 44, 105, 2899)
+int.v <- round(quantile(tmp$alb, probs = seq(0, 1, l = 11)))
+int.v[2] <- 1
 int.c <- int.v[1:(length(int.v)-1)]
 int.c2 <- int.v[2:length(int.v)]
-tmp$disc <- cut(tmp$yft, breaks = int.v,
+tmp$disc <- cut(tmp$alb, breaks = int.v,
                 include.lowest = TRUE, right = FALSE,
                 labels = int.c, dig.lab = 0)
 
@@ -2490,7 +2515,7 @@ gPal <- colorRampPalette(rev(brewer.pal(10, "RdYlGn")))
 cor <- gPal(length(int.c))
 
 #####@> mapping...
-p00 <- ggplot(data = tmp, aes(x = lon, y = lat)) +
+p00 <- ggplot(data = tmp, aes(x = lon5, y = lat5)) +
     geom_tile(aes(fill = disc), colour = "black") +
     geom_polygon(data = mm, aes(x = long, y = lat, group = group)) +
     geom_hline(yintercept = 0, color = "black", linetype = "dashed") +
@@ -2502,7 +2527,7 @@ p00 <- ggplot(data = tmp, aes(x = lon, y = lat)) +
                       labels = rev(paste("[", int.c, ", ",
                                          int.c2, ")", sep = "")),
                       limits = int.c, breaks = rev(int.c)) +
-    coord_fixed(xlim = c(-55, -15), ylim = c(-35, -15)) +
+    coord_fixed(xlim = c(-55, -15), ylim = c(-40, -15)) +
     xlab(expression(paste("Longitude ", "(", degree, ")"))) +
     ylab(expression(paste("Latitude ", "(", degree, ")"))) +
     my_theme()
@@ -2511,22 +2536,25 @@ savePlot("Map_Clusters_Decade_Y1_R03.png", type = "png")
 
 ## Vizualizando as producoes por grupos... Para isso é necessario transformar o
 ## data.frame e remover ano e cod...
-temp <- select(jdat02, hcltrp, yft, alb, bet, swo, sai, bum, bsh, whm, sma)
+temp <- dplyr::select(jdat02, hcltrp, yft, alb, bet, swo, sai, bum, bsh,
+                      whm, sma)
 temp.melt <- melt(temp, id.vars = "hcltrp")
 col <- c("#000000", "#252525", rev(brewer.pal(9, "Purples")))
 
 temp <- temp.melt %>%
     group_by(hcltrp, variable) %>%
-    summarise(value = sum(value))
+    summarise(value = sum(value)) %>%
+    mutate(P = value/sum(value))
 
-p <- ggplot(temp, aes(x = factor(1), y = value, fill = factor(variable))) +
+p <- ggplot(temp, aes(x = factor(1), y = P, fill = factor(variable))) +
     geom_bar(stat = "identity") +
     coord_polar(theta = "y", direction = 2) +
-    facet_wrap(~ hcltrp, ncol = 3) + xlab("") + ylab("") +
+    facet_wrap(~ hcltrp, ncol = 2) + xlab("") + ylab("") +
     labs(fill = "Species") +
     scale_fill_manual(values = col)
+p
 
-png("./Figuras/Pie-chart_species_by_group.png", width = 1080, height = 1080,
+png("Pie-chart_species_by_group.png", width = 1080, height = 1080,
     res = 100)
 print(p)
 dev.off()
