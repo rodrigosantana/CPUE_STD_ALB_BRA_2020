@@ -822,6 +822,54 @@ glmdat <- select_data_JointIO(jdat02.cut,
                               samp = NA,
                               strsmp = NA)
 
+#####@> Coverage in region 02...
+
+####@> Prepdat3...
+tmp01 <- prepdat3 %>%
+    filter(regY1 == 2) %>%
+    filter(op_yr %in% 1998:2018) %>%
+    group_by(op_yr) %>%
+    summarise(Total = n())
+
+####@> Jdat02.cut...
+tmp02 <- jdat02.cut %>%
+    filter(regY1 == 2) %>%
+    filter(op_yr %in% 1998:2018) %>%
+    group_by(op_yr) %>%
+    summarise(Total2 = n())
+
+####@> Modelo...
+tmp03 <- glmdat %>%
+    mutate(op_yr = as.numeric(substr(yrqtr, 1, 4))) %>%
+    filter(op_yr %in% 1998:2018) %>%
+    group_by(op_yr) %>%
+    summarise(Amostra = n())
+
+#####@> Merging...
+tmp <- tmp01 %>%
+    full_join(tmp02, by = "op_yr") %>%
+    full_join(tmp03, by = "op_yr") %>%
+    mutate(coverage01 = (Amostra / Total) * 100,
+           coverage02 = (Amostra / Total2) * 100)
+
+p00 <- ggplot(tmp, aes(x = op_yr, y = coverage01)) +
+    geom_line() +
+    geom_label(aes(label = paste(round(coverage01, 1), "%"))) +
+    scale_y_continuous(limits = c(0, 100)) +
+    scale_x_continuous(limits = c(1998, 2018),
+                       breaks = seq(1998, 2018, 2)) +
+    geom_hline(yintercept = mean(tmp$coverage01), linetype = "dashed") +
+    annotate(geom = "text", x = 2017.8, y = mean(tmp$coverage01) - 1,
+             label = "Average Coverage") +
+    labs(x = "Year", y = "Coverage (%)", caption = "Coverage R02") +
+    my_theme()
+p00
+
+png("Coverage_R02_ver00.png", units = "cm", res = 200,
+    w = 35, h = 20)
+print(p00)
+dev.off()
+
 #####@> LognC Models...
 
 ####@> Defining the constant...
@@ -933,6 +981,54 @@ glmdat <- select_data_JointIO(jdat03.cut,
                               addpca = NA,
                               samp = NA,
                               strsmp = NA)
+
+#####@> Coverage in region 03...
+
+####@> Prepdat3...
+tmp01 <- prepdat3 %>%
+    filter(regY1 == 3) %>%
+    filter(op_yr %in% 1998:2018) %>%
+    group_by(op_yr) %>%
+    summarise(Total = n())
+
+####@> Jdat03.cut...
+tmp02 <- jdat03.cut %>%
+    filter(regY1 == 3) %>%
+    filter(op_yr %in% 1998:2018) %>%
+    group_by(op_yr) %>%
+    summarise(Total2 = n())
+
+####@> Modelo...
+tmp03 <- glmdat %>%
+    mutate(op_yr = as.numeric(substr(yrqtr, 1, 4))) %>%
+    filter(op_yr %in% 1998:2018) %>%
+    group_by(op_yr) %>%
+    summarise(Amostra = n())
+
+#####@> Merging...
+tmp <- tmp01 %>%
+    full_join(tmp02, by = "op_yr") %>%
+    full_join(tmp03, by = "op_yr") %>%
+    mutate(coverage01 = (Amostra / Total) * 100,
+           coverage02 = (Amostra / Total2) * 100)
+
+p00 <- ggplot(tmp, aes(x = op_yr, y = coverage01)) +
+    geom_line() +
+    geom_label(aes(label = paste(round(coverage01, 1), "%"))) +
+    scale_y_continuous(limits = c(0, 100)) +
+    scale_x_continuous(limits = c(1998, 2018),
+                       breaks = seq(1998, 2018, 2)) +
+    geom_hline(yintercept = mean(tmp$coverage01), linetype = "dashed") +
+    annotate(geom = "text", x = 2017.8, y = mean(tmp$coverage01) - 1,
+             label = "Average Coverage") +
+    labs(x = "Year", y = "Coverage (%)", caption = "Coverage R03") +
+    my_theme()
+p00
+
+png("Coverage_R03_ver00.png", units = "cm", res = 200,
+    w = 35, h = 20)
+print(p00)
+dev.off()
 
 #####@> LognC Models...
 
